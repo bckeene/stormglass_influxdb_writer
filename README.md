@@ -1,6 +1,6 @@
-# stormglass_hindcast
+# stormglass_influxdb_writer
 
-This script collects historical weather metrics from https://stormglass.io/, converts them to line protocol, and then writes each point into a user-defined bucket in InfluxDB Cloud.
+This script collects historical weather metrics from https://stormglass.io/, converts them to line protocol, and then writes data to a user-defined bucket in InfluxDB Cloud.
 
 ```beache_meta.csv``` should be updated with user's prefered locations.
 
