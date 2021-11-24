@@ -1,9 +1,11 @@
-# stormglass_influxdb_writer
+# stormglass_hindcast
 
 This script collects historical weather metrics from https://stormglass.io/, converts them to line protocol, and then writes each point into a user-defined bucket in InfluxDB Cloud.
 
-config.py should be updated with user's personal access credentials as follows:
+```beache_meta.csv``` should be updated with user's prefered locations.
 
-InfluxDB Cloud - free tier account use (https://cloud2.influxdata.com/signup)
+```config.py``` should be updated with user's personal access credentials as follows:
 
-Stormglass - base account permits 50 API requests per day (https://dashboard.stormglass.io/register)
+**InfluxDB Cloud** - free tier account use  from https://cloud2.influxdata.com/signup
+
+**Stormglass.io** - base account permits 50 API requests per day from https://dashboard.stormglass.io/register
