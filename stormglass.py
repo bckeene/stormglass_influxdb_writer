@@ -1,88 +1,103 @@
-import config
 import csv
+import json
 import requests
 import arrow
-import json
+import config
 import influxdb_client
 
 from influxdb_client.client.write_api import SYNCHRONOUS
 from influxdb_client.domain.write_precision import WritePrecision
 
-# Intitialize influxdb_client
+
+# Initialize InfluxDB client
 client = influxdb_client.InfluxDBClient(
-    url=config.influx_url,   
+    url=config.influx_url,
     token=config.influx_token,
     org=config.influx_org
 )
-
 write_api = client.write_api(write_options=SYNCHRONOUS)
 
-# Read in CSV file with beach meta data (name, county, state, and lat/lon)
-with open('/Users/briankeene/Desktop/beach_meta_1.csv', encoding='utf-8') as csvfile:
-    beach_meta_data = list(csv.DictReader(csvfile))
 
-# Create list for populating stormglass api response data
-stormglass_data = []
+# Supporting Functions
 
-# Create variable to track UTC a time of script 
-current_UTC = arrow.utcnow()
+def load_beach_metadata(path):
+    with open(path, encoding='utf-8') as f:
+        return list(csv.DictReader(f))
 
-# Call Stormglass API for each item in coordinates_list
-for beach in range(len(beach_meta_data)):
-    print('Pulling data for - ' + str(beach_meta_data[beach]['name']))
 
-    response = requests.get(
-        'https://api.stormglass.io/v2/weather/point',
-            params={
-                'lat': float(beach_meta_data[beach]['lat']),
-                'lng': float(beach_meta_data[beach]['lon']),
-                'params': ','.join(['airTemperature','cloudCover','humidity','swellHeight','pressure','windDirection','windSpeed','waterTemperature','waveHeight']),
-                'source': 'noaa',
-                'start': (current_UTC.shift(days=-5).timestamp()),
-                'end': (current_UTC.timestamp()),
-                },
-            headers={
+def fetch_weather_data(lat, lon, start, end):
+    url = 'https://api.stormglass.io/v2/weather/point'
+    params = {
+        'lat': float(lat),
+        'lng': float(lon),
+        'params': ','.join([
+            'airTemperature', 'cloudCover', 'humidity', 'swellHeight',
+            'pressure', 'windDirection', 'windSpeed', 'waterTemperature',
+            'waveHeight'
+        ]),
+        'source': 'noaa',
+        'start': start,
+        'end': end,
+    }
+    headers = {
         'Authorization': config.stormglass_auth
-        },
+    }
+
+    response = requests.get(url, params=params, headers=headers)
+    response.raise_for_status()
+    return response.json().get('hours', [])
+
+
+def create_weather_point(metadata, metrics):
+    time = arrow.get(metrics['time']).timestamp()
+
+    return (
+        influxdb_client.Point('weather')
+        .tag('source', 'noaa')
+        .tag('name', metadata['name'])
+        .tag('state', metadata['state'])
+        .tag('county', metadata['county'])
+        .tag('prediction', 'hindcast')
+        .field('air_temp', float(metrics['airTemperature']['noaa']))
+        .field('cloud_cover', float(metrics['cloudCover']['noaa']))
+        .field('humidity', float(metrics['humidity']['noaa']))
+        .field('swell_height', float(metrics['swellHeight']['noaa']))
+        .field('pressure', float(metrics['pressure']['noaa']))
+        .field('wind_direction', float(metrics['windDirection']['noaa']))
+        .field('wind_speed', float(metrics['windSpeed']['noaa']))
+        .field('water_temp', float(metrics['waterTemperature']['noaa']))
+        .field('wave_height', float(metrics['waveHeight']['noaa']))
+        .field('lat', float(metadata['lat']))
+        .field('lon', float(metadata['lon']))
+        .time(int(time), write_precision=WritePrecision.S)
     )
 
-    # Append each JSON response representing weather metrics for lat/long used to make Stormglass API call
-    stormglass_data.append(response.json()['hours'])
 
-for current_row, location in zip(stormglass_data, beach_meta_data):
-    current_row.append(location)
+# Main
 
-for stormglass_metrics in stormglass_data:
-    meta_data = next((d for d in stormglass_metrics if 'lat' in d), None)
+def main():
+    beach_data_path = '/Users/briankeene/Desktop/beach_meta_1.csv'
+    beaches = load_beach_metadata(beach_data_path)
 
-    print('Chunk of metrics for - ' + str(meta_data['name']))
-    for hourly_weather_metrics in stormglass_metrics:
-        if 'airTemperature' in hourly_weather_metrics:
+    now = arrow.utcnow()
+    start_time = now.shift(days=-5).timestamp()
+    end_time = now.timestamp()
 
-            # Tagset variables
-            name = meta_data['name']
-            state = meta_data['state']
-            county = meta_data['county']
+    for beach in beaches:
+        print(f"Pulling data for - {beach['name']}")
 
-            # Fieldset variables
-            air_temp = hourly_weather_metrics['airTemperature']['noaa']
-            cloud_cover = hourly_weather_metrics['cloudCover']['noaa']
-            humidity = hourly_weather_metrics['humidity']['noaa']
-            swell_height = hourly_weather_metrics['swellHeight']['noaa']
-            pressure = hourly_weather_metrics['pressure']['noaa']
-            wind_direction = hourly_weather_metrics['windDirection']['noaa']
-            wind_speed = hourly_weather_metrics['windSpeed']['noaa']
-            water_temp = hourly_weather_metrics['waterTemperature']['noaa']
-            wave_height = hourly_weather_metrics['waveHeight']['noaa']
-            latitude = meta_data['lat']
-            longitude = meta_data['lon']
+        try:
+            hourly_data = fetch_weather_data(beach['lat'], beach['lon'], start_time, end_time)
+        except requests.RequestException as e:
+            print(f"Failed to fetch data for {beach['name']}: {e}")
+            continue
 
-            # Timestamp variable
-            time = arrow.get(hourly_weather_metrics['time']).timestamp()
+        for hourly_metrics in hourly_data:
+            if 'airTemperature' in hourly_metrics:
+                point = create_weather_point(beach, hourly_metrics)
+                print(point.to_line_protocol())
+                write_api.write(bucket=config.influx_bucket, org=config.influx_org, record=point)
 
-            # Create point of data in line protocol format
-            weather_point = influxdb_client.Point('weather').tag('source','noaa').tag('name',name).tag('state',state).tag('county',county).tag("prediction", "hindcast").field("air_temp",float(air_temp)).field("cloud_cover",float(cloud_cover)).field("humidity",float(humidity)).field("swell_height",float(swell_height)).field("pressure",float(pressure)).field("wind_direction",float(wind_direction)).field("wind_speed",float(wind_speed)).field("water_temp",float(water_temp)).field("wave_height",float(wave_height)).field("lat",float(latitude)).field("lon",float(longitude)).time((int(time)), write_precision=WritePrecision.S)
-            
-            # Print data point and write to InfluxDB
-            print(weather_point.to_line_protocol())
-            write_api.write(bucket=config.influx_bucket, org=config.influx_org, record=weather_point)
+
+if __name__ == '__main__':
+    main()
