@@ -8,4 +8,4 @@ influx_token = "..."
 stormglass_auth = "..."
 
 # Beaches list file directory 
-beache_list_directory =
+beaches_list_directory = "..."
