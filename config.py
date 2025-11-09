@@ -6,3 +6,6 @@ influx_token = "..."
 
 # Stormglass access credentials
 stormglass_auth = "..."
+
+# Beaches list file directory 
+beache_list_directory =
