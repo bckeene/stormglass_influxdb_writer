@@ -76,7 +76,7 @@ def create_weather_point(metadata, metrics):
 # Main
 
 def main():
-    beach_data_path = '/Users/briankeene/Desktop/beach_meta_1.csv'
+    beach_data_path = config.beaches_directory
     beaches = load_beach_metadata(beach_data_path)
 
     now = arrow.utcnow()
